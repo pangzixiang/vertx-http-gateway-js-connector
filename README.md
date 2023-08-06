@@ -5,5 +5,13 @@ Javascript implementation for [vertx-http-gateway-connector](https://github.com/
 ## How to use
 ```js
 const connect = require("vertx-http-gateway-js-connector")
-connect(serviceName, port, "localhost", "9090")
+connect({
+    listenerHost : "localhost",
+    listenerPort : 9090,
+    listenerSsl : false,
+    serviceName : "test-service",
+    servicePort : 12345,
+    serviceHost : "localhost",
+    serviceSsl : false
+})
 ```
