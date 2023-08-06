@@ -21,7 +21,7 @@ server.listen(0, "localhost", () => {
         servicePort : server.address().port,
         serviceHost : "localhost",
         serviceSsl : false,
-        instanceNum : 4
+        instanceNum : 2
     })
     connector.connect();
 
