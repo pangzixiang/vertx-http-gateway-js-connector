@@ -42,7 +42,7 @@ function connect(options) {
                 path: uri,
                 method: httpMethod,
                 headers: JSON.stringify(headers),
-                protocol: serviceSsl? 'https:' : 'http'
+                protocol: serviceSsl? 'https:' : 'http:'
             }
 
             const req = http.request(requestOption, res => {
