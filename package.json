@@ -1,6 +1,6 @@
 {
   "name": "vertx-http-gateway-js-connector",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "description": "Javascript implementation for vertx-http-gateway-connector",
   "main": "main.js",
   "author": "pangzixiang",
@@ -8,9 +8,21 @@
     "vertx-http-gateway-js-connector",
     "vertx-http-gateway-connector"
   ],
+  "scripts": {
+    "test": "node test.js"
+  },
   "license": "ISC",
   "dependencies": {
     "cache": "^3.0.0",
     "ws": "^8.13.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pangzixiang/vertx-http-gateway-js-connector"
+  },
+  "homepage": "https://github.com/pangzixiang/vertx-http-gateway-js-connector",
+  "bugs": {
+    "url": "https://github.com/pangzixiang/vertx-http-gateway-js-connector/issues",
+    "email": "313227220@qq.com"
   }
 }

@@ -6,102 +6,129 @@ const RequestMessageInfoChunkBody = require("./RequestMessageInfoChunkBody")
 const MessageChunk = require("./MessageChunk")
 
 const chunkTypeArray = new Uint8Array([-2, 0, 1, 2, 3])
-
 const cache = new Cache(5 * 60 * 1000);
 
-function connect(options) {
-    const {
-        listenerHost = "localhost",
-        listenerPort = 0,
-        listenerSsl = false,
-        serviceName = "",
-        servicePort = 0,
-        serviceHost = "localhost",
-        serviceSsl= false
-    } = options;
-    const connectUrl = `${listenerSsl? "wss": "ws"}://${listenerHost}:${listenerPort}/register?serviceName=${serviceName}&servicePort=${servicePort}&instance=js-${Date.now()}`;
-    const ws = new Websocket(connectUrl);
+class Connector {
+    constructor(options) {
+        const {
+            listenerHost = "localhost",
+            listenerPort = 0,
+            listenerSsl = false,
+            serviceName = "",
+            servicePort = 0,
+            serviceHost = "localhost",
+            serviceSsl = false,
+            instanceNum = 2
+        } = options;
 
-    ws.on('open', () => {
-        console.log(`Succeeded to connect to vertx http gateway ${connectUrl}`)
-    })
+        this.connectionUrl = `${listenerSsl ? "wss" : "ws"}://${listenerHost}:${listenerPort}/register?serviceName=${serviceName}&servicePort=${servicePort}&instance=`;
+        this.serviceHost = serviceHost;
+        this.serviceSsl = serviceSsl;
+        this.servicePort = servicePort;
+        this.isClose = false;
+        this.wsList = []
+        this.instanceNum = instanceNum;
+    }
 
-    ws.on('message', (data) => {
-        const messageChunk = new MessageChunk(data)
+    connect() {
+        for (let i = 0; i < this.instanceNum; i ++) {
+            const wsUrl = this.connectionUrl + `js${Math.round(Math.random()*10)}-${Date.now()}`
+            const ws = new Websocket(wsUrl)
+            this.wsList[i] = ws;
+            ws.on('open', () => {
+                console.log(`Succeeded to connect to vertx http gateway ${wsUrl}`)
+            })
 
-        if (messageChunk.getChunkType() === chunkTypeArray[1]) {
-            const requestMessageInfoChunkBody = new RequestMessageInfoChunkBody(messageChunk.getChunkBody().toString())
-            const httpMethod = requestMessageInfoChunkBody.getHttpMethod();
-            const headers = requestMessageInfoChunkBody.getHeaders();
-            const uri = requestMessageInfoChunkBody.getUri();
-            const httpVersion = requestMessageInfoChunkBody.getHttpVersion();
+            ws.on('message', (data) => {
+                const messageChunk = new MessageChunk(data)
 
-            const requestOption = {
-                hostname: serviceHost,
-                port: servicePort,
-                path: uri,
-                method: httpMethod,
-                headers: JSON.stringify(headers),
-                protocol: serviceSsl? 'https:' : 'http:'
-            }
+                if (messageChunk.getChunkType() === chunkTypeArray[1]) {
+                    const requestMessageInfoChunkBody = new RequestMessageInfoChunkBody(messageChunk.getChunkBody().toString())
+                    const httpMethod = requestMessageInfoChunkBody.getHttpMethod();
+                    const headers = requestMessageInfoChunkBody.getHeaders();
+                    const uri = requestMessageInfoChunkBody.getUri();
+                    const httpVersion = requestMessageInfoChunkBody.getHttpVersion();
 
-            const req = http.request(requestOption, res => {
-                const responseMessageInfoChunkBody = buildResponseMessageInfoChunkBody(res);
-                const firstBuffer = Buffer.alloc(9)
-                firstBuffer.writeUInt8(chunkTypeArray[1])
-                firstBuffer.writeBigInt64BE(messageChunk.getRequestId(), 1)
-                const responseInfoChunkBodyBuffer = Buffer.from(responseMessageInfoChunkBody)
-                ws.send(Buffer.concat([firstBuffer, responseInfoChunkBodyBuffer]))
+                    const requestOption = {
+                        hostname: this.serviceHost,
+                        port: this.servicePort,
+                        path: uri,
+                        method: httpMethod,
+                        headers: JSON.stringify(headers),
+                        protocol: this.serviceSsl ? 'https:' : 'http:'
+                    }
 
-                res.on('data', (data) => {
-                    const firstBuffer = Buffer.alloc(9)
-                    firstBuffer.writeUInt8(chunkTypeArray[2])
-                    firstBuffer.writeBigInt64BE(messageChunk.getRequestId(), 1)
-                    const bodyChunkBuffer = Buffer.from(data)
-                    ws.send(Buffer.concat([firstBuffer, bodyChunkBuffer]))
-                })
+                    const req = http.request(requestOption, res => {
+                        const responseMessageInfoChunkBody = buildResponseMessageInfoChunkBody(res);
+                        const firstBuffer = Buffer.alloc(9)
+                        firstBuffer.writeUInt8(chunkTypeArray[1])
+                        firstBuffer.writeBigInt64BE(messageChunk.getRequestId(), 1)
+                        const responseInfoChunkBodyBuffer = Buffer.from(responseMessageInfoChunkBody)
+                        ws.send(Buffer.concat([firstBuffer, responseInfoChunkBodyBuffer]))
 
-                res.on('end', () => {
-                    const firstBuffer = Buffer.alloc(9)
-                    firstBuffer.writeUInt8(chunkTypeArray[3])
-                    firstBuffer.writeBigInt64BE(messageChunk.getRequestId(), 1)
-                    ws.send(firstBuffer)
-                })
-            });
+                        res.on('data', (data) => {
+                            const firstBuffer = Buffer.alloc(9)
+                            firstBuffer.writeUInt8(chunkTypeArray[2])
+                            firstBuffer.writeBigInt64BE(messageChunk.getRequestId(), 1)
+                            const bodyChunkBuffer = Buffer.from(data)
+                            ws.send(Buffer.concat([firstBuffer, bodyChunkBuffer]))
+                        })
 
-            cache.put(messageChunk.getRequestId(), req)
+                        res.on('end', () => {
+                            const firstBuffer = Buffer.alloc(9)
+                            firstBuffer.writeUInt8(chunkTypeArray[3])
+                            firstBuffer.writeBigInt64BE(messageChunk.getRequestId(), 1)
+                            ws.send(firstBuffer)
+                        })
+                    });
 
-            req.on('close', () => {
-                cache.del(messageChunk.getRequestId())
+                    cache.put(messageChunk.getRequestId(), req)
+
+                    req.on('close', () => {
+                        cache.del(messageChunk.getRequestId())
+                    })
+                }
+
+                if (messageChunk.getChunkType() === chunkTypeArray[2]) {
+                    if (cache.get(messageChunk.getRequestId())) {
+                        const req = cache.get(messageChunk.getRequestId())
+                        req.write(messageChunk.getChunkBody())
+                    }
+                }
+
+                if (messageChunk.getChunkType() === chunkTypeArray[3]) {
+                    if (cache.get(messageChunk.getRequestId())) {
+                        const req = cache.get(messageChunk.getRequestId())
+                        req.end();
+                    }
+                }
+            })
+
+            ws.on('close', () => {
+                console.warn(`connection to vertx http gateway ${wsUrl} is closed`)
+                if (!this.isClose) {
+                    this.reconnectJob = setTimeout(() => {
+                        console.log(`connection ${wsUrl} retry`)
+                        this.connect()
+                    }, 2000)
+                }
+            })
+
+            ws.on('error', (err) => {
+                console.error(`failed to connect to vertx http gateway ${wsUrl} due to ${err}`)
             })
         }
 
-        if (messageChunk.getChunkType() === chunkTypeArray[2]) {
-            if (cache.get(messageChunk.getRequestId())) {
-                const req = cache.get(messageChunk.getRequestId())
-                req.write(messageChunk.getChunkBody())
-            }
+    }
+
+    disconnect() {
+        this.isClose = true;
+        if (this.reconnectJob) {
+            clearTimeout(this.reconnectJob)
         }
 
-        if (messageChunk.getChunkType() === chunkTypeArray[3]) {
-            if (cache.get(messageChunk.getRequestId())) {
-                const req = cache.get(messageChunk.getRequestId())
-                req.end();
-            }
-        }
-    })
-
-    ws.on('close', () => {
-        console.warn(`connection to vertx http gateway ${connectUrl} is closed`)
-        setTimeout(() => {
-            console.log(`connection ${connectUrl} retry`)
-            connect(serviceName, servicePort, listenerHost, listenerPort)
-        }, 2000)
-    })
-
-    ws.on('error', (err) => {
-        console.error(`failed to connect to vertx http gateway ${connectUrl} due to ${err}`)
-    })
+        this.wsList.forEach((ws) => ws.terminate())
+    }
 }
 
 function buildResponseMessageInfoChunkBody(res) {
@@ -112,4 +139,4 @@ function buildResponseMessageInfoChunkBody(res) {
     return result;
 }
 
-module.exports = connect;
+module.exports = Connector;
