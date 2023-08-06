@@ -1,6 +1,6 @@
 {
   "name": "vertx-http-gateway-js-connector",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Javascript implementation for vertx-http-gateway-connector",
   "main": "main.js",
   "author": "pangzixiang",
