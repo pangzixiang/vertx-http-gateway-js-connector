@@ -2,14 +2,24 @@ const Websocket = require('ws');
 const http = require('http')
 const Cache = require('cache')
 const os = require('os')
+const RequestMessageInfoChunkBody = require("./RequestMessageInfoChunkBody")
+const MessageChunk = require("./MessageChunk")
 
 const chunkTypeArray = new Uint8Array([-2, 0, 1, 2, 3])
 
-const cache = new Cache(5*60*1000);
+const cache = new Cache(5 * 60 * 1000);
 
-function connect(serviceName, servicePort, listenerHost, listenerPort) {
-    const serviceHost = "localhost"
-    const connectUrl = `ws://${listenerHost}:${listenerPort}/register?serviceName=${serviceName}&servicePort=${servicePort}&instance=js-${Date.now()}`;
+function connect(options) {
+    const {
+        listenerHost = "localhost",
+        listenerPort = 0,
+        listenerSsl = false,
+        serviceName = "",
+        servicePort = 0,
+        serviceHost = "localhost",
+        serviceSsl= false
+    } = options;
+    const connectUrl = `${listenerSsl? "wss": "ws"}://${listenerHost}:${listenerPort}/register?serviceName=${serviceName}&servicePort=${servicePort}&instance=js-${Date.now()}`;
     const ws = new Websocket(connectUrl);
 
     ws.on('open', () => {
@@ -31,7 +41,8 @@ function connect(serviceName, servicePort, listenerHost, listenerPort) {
                 port: servicePort,
                 path: uri,
                 method: httpMethod,
-                headers: JSON.stringify(headers)
+                headers: JSON.stringify(headers),
+                protocol: serviceSsl? 'https:' : 'http'
             }
 
             const req = http.request(requestOption, res => {
@@ -99,59 +110,6 @@ function buildResponseMessageInfoChunkBody(res) {
         result += `${key}:${res.headers[key]}` + os.EOL
     }
     return result;
-}
-
-class MessageChunk {
-    constructor(buffer) {
-        this.chunkType = buffer.readUInt8(0);
-        this.requestId = buffer.readBigInt64BE(1);
-        this.chunkBody = buffer.slice(9)
-    }
-
-    getChunkType() {
-        return this.chunkType
-    }
-
-    getRequestId() {
-        return this.requestId
-    }
-
-    getChunkBody() {
-        return this.chunkBody
-    }
-}
-
-class RequestMessageInfoChunkBody {
-
-    constructor(requestInfoChunkBody) {
-        const lines = requestInfoChunkBody.split(os.EOL)
-        const firstLine = lines[0].split(" ")
-        this.httpVersion = firstLine[0]
-        this.httpMethod = firstLine[1]
-        this.uri = firstLine[2]
-        this.headers = new Map()
-        for (let i = 1; i < lines.length; i ++) {
-            const line = lines[i].split(":")
-            this.headers.set(line[0], line[1])
-        }
-    }
-
-    getHttpVersion() {
-        return this.httpVersion
-    }
-
-    getHttpMethod() {
-        return this.httpMethod
-    }
-
-    getUri() {
-        return this.uri
-    }
-
-    getHeaders() {
-        return this.headers
-    }
-
 }
 
 module.exports = connect;
