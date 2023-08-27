@@ -18,10 +18,11 @@ class Connector {
             servicePort = 0,
             serviceHost = "localhost",
             serviceSsl = false,
-            instanceNum = 2
+            instanceNum = 2,
+            registerPath = "/register"
         } = options;
 
-        this.connectionUrl = `${listenerSsl ? "wss" : "ws"}://${listenerHost}:${listenerPort}/register?serviceName=${serviceName}&servicePort=${servicePort}&instance=`;
+        this.connectionUrl = `${listenerSsl ? "wss" : "ws"}://${listenerHost}:${listenerPort}${registerPath}?serviceName=${serviceName}&servicePort=${servicePort}&instance=`;
         this.serviceHost = serviceHost;
         this.serviceSsl = serviceSsl;
         this.servicePort = servicePort;
