@@ -3,7 +3,7 @@
 ## What is it
 Javascript implementation for [vertx-http-gateway-connector](https://github.com/pangzixiang/vertx-http-gateway)
 ## How to use
-```js
+```ts
 import * as http from "http";
 import {AddressInfo} from "node:net";
 import {VertxHttpGatewayConnector} from "../src";

@@ -24,3 +24,4 @@ dist-ssr
 *.sw?
 /vertx-http-gateway-js-connector.iml
 dest
+dest-test
