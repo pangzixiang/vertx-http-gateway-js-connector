@@ -8,4 +8,7 @@ export interface VertxHttpGatewayConnectorOptionsType {
   servicePort: number;
   serviceUseSsl?: boolean;
   instanceNum?: number;
+  pathConverter?: PathConverter;
 }
+
+export type PathConverter = (path: string) => string;

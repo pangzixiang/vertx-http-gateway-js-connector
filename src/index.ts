@@ -1,4 +1,4 @@
-import { type VertxHttpGatewayConnectorOptionsType } from './type/Types';
+import { type PathConverter, type VertxHttpGatewayConnectorOptionsType } from './type/Types';
 import { MessageChunk } from './model/MessageChunk';
 import { buildResponseMessageInfoChunkBody, chunkTypeArray } from './Commons';
 import { RequestMessageInfoChunkBody } from './model/RequestMessageInfoChunkBody';
@@ -20,6 +20,7 @@ export class VertxHttpGatewayConnector {
   private readonly _instanceNum: number;
   private readonly _wsList: WebSocket[] = [];
   private readonly _reconnectList: NodeJS.Timeout[] = [];
+  private readonly _pathConverter: PathConverter;
 
   constructor(options: VertxHttpGatewayConnectorOptionsType) {
     const {
@@ -32,6 +33,7 @@ export class VertxHttpGatewayConnector {
       serviceUseSsl = false,
       instanceNum = 2,
       registerPath = '/register',
+      pathConverter = (p: string) => p,
     } = options;
 
     this._connectionUrl = `${registerUseSsl ? 'wss' : 'ws'}://${registerHost}:${registerPort}${registerPath}?serviceName=${serviceName}&servicePort=${servicePort}&instance=`;
@@ -40,6 +42,7 @@ export class VertxHttpGatewayConnector {
     this._servicePort = servicePort;
     this._isClose = false;
     this._instanceNum = instanceNum;
+    this._pathConverter = pathConverter;
   }
 
   public start(): void {
@@ -75,7 +78,7 @@ export class VertxHttpGatewayConnector {
           const requestMessageInfoChunkBody = new RequestMessageInfoChunkBody(messageChunk.chunkBody.toString());
           const httpMethod = requestMessageInfoChunkBody.httpMethod;
           const headers = requestMessageInfoChunkBody.headers;
-          const uri = requestMessageInfoChunkBody.uri;
+          const uri = this._pathConverter(requestMessageInfoChunkBody.uri);
           // const httpVersion = requestMessageInfoChunkBody.httpVersion;
 
           console.debug(`start to handle request for ${httpMethod} ${uri}`);
