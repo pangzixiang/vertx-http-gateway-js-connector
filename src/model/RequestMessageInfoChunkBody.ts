@@ -1,4 +1,4 @@
-import * as http from 'http';
+import type * as http from 'http';
 import { EOL } from '../Commons';
 
 export class RequestMessageInfoChunkBody {
@@ -14,7 +14,7 @@ export class RequestMessageInfoChunkBody {
     this._uri = firstLine[2];
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].split(':');
-      if (line[0] && line[1]) {
+      if (line[0].length > 0 && line[1].length > 0) {
         this._headers[line[0].toLowerCase()] = line[1];
       }
     }

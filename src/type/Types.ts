@@ -1,4 +1,4 @@
-export type VertxHttpGatewayConnectorOptionsType = {
+export interface VertxHttpGatewayConnectorOptionsType {
   registerHost?: string;
   registerPort: number;
   registerUseSsl?: boolean;
@@ -8,4 +8,4 @@ export type VertxHttpGatewayConnectorOptionsType = {
   servicePort: number;
   serviceUseSsl?: boolean;
   instanceNum?: number;
-};
+}
