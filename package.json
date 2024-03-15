@@ -2,7 +2,8 @@
   "name": "vertx-http-gateway-js-connector",
   "version": "2.0.4",
   "description": "Vert.x Http Gateway Connector For Node",
-  "main": "./dest/index.js",
+  "main": "dest/index.js",
+  "types": "dest/index.d.ts",
   "scripts": {
     "build": "tsc",
     "test": "tsc --project tsconfig.test.json && node dest-test/test/LocalTest",
@@ -30,7 +31,7 @@
     "email": "313227220@qq.com"
   },
   "files": [
-    "dest/**/*"
+    "dest"
   ],
   "devDependencies": {
     "@types/node": "^20.11.26",
