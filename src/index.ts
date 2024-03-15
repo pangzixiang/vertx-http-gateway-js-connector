@@ -2,11 +2,12 @@ import { type PathConverter, type VertxHttpGatewayConnectorOptionsType } from '.
 import { MessageChunk } from './model/MessageChunk';
 import { buildResponseMessageInfoChunkBody, chunkTypeArray } from './Commons';
 import { RequestMessageInfoChunkBody } from './model/RequestMessageInfoChunkBody';
-import * as http from 'http';
-import { type RequestOptions } from 'node:http';
+import { type ClientRequest, type IncomingMessage, type RequestOptions } from 'node:http';
 import { CacheContainer } from 'node-ts-cache';
 import { MemoryStorage } from 'node-ts-cache-storage-memory';
-import WebSocket from 'ws';
+import WebSocket, { type ClientOptions } from 'ws';
+import * as https from 'https';
+import * as http from 'http';
 
 const cache = new CacheContainer(new MemoryStorage());
 const cacheTTL = 5 * 60;
@@ -21,12 +22,15 @@ export class VertxHttpGatewayConnector {
   private readonly _wsList: WebSocket[] = [];
   private readonly _reconnectList: NodeJS.Timeout[] = [];
   private readonly _pathConverter: PathConverter;
+  private readonly _registerClientOptions: ClientOptions | undefined;
+  private readonly _proxyAgent: http.Agent | https.Agent | undefined;
 
   constructor(options: VertxHttpGatewayConnectorOptionsType) {
     const {
       registerHost = 'localhost',
       registerPort = 0,
       registerUseSsl = false,
+      registerClientOptions = undefined,
       serviceName = '',
       servicePort = 0,
       serviceHost = 'localhost',
@@ -34,6 +38,7 @@ export class VertxHttpGatewayConnector {
       instanceNum = 2,
       registerPath = '/register',
       pathConverter = (p: string) => p,
+      proxyAgent = undefined,
     } = options;
 
     this._connectionUrl = `${registerUseSsl ? 'wss' : 'ws'}://${registerHost}:${registerPort}${registerPath}?serviceName=${serviceName}&servicePort=${servicePort}&instance=`;
@@ -43,6 +48,8 @@ export class VertxHttpGatewayConnector {
     this._isClose = false;
     this._instanceNum = instanceNum;
     this._pathConverter = pathConverter;
+    this._registerClientOptions = registerClientOptions;
+    this._proxyAgent = proxyAgent;
   }
 
   public start(): void {
@@ -63,8 +70,39 @@ export class VertxHttpGatewayConnector {
     });
   }
 
+  private handleIncomingMessage(res: IncomingMessage, messageChunk: MessageChunk, ws: WebSocket): void {
+    const responseMessageInfoChunkBody = buildResponseMessageInfoChunkBody(res);
+    const firstBuffer = Buffer.alloc(9);
+    firstBuffer.writeUInt8(chunkTypeArray[1]);
+    firstBuffer.writeBigInt64BE(messageChunk.requestId, 1);
+    const responseInfoChunkBodyBuffer = Buffer.from(responseMessageInfoChunkBody);
+    ws.send(Buffer.concat([firstBuffer, responseInfoChunkBodyBuffer]));
+
+    res.on('data', (data) => {
+      const firstBuffer = Buffer.alloc(9);
+      firstBuffer.writeUInt8(chunkTypeArray[2]);
+      firstBuffer.writeBigInt64BE(messageChunk.requestId, 1);
+      const bodyChunkBuffer = Buffer.from(data as Uint8Array);
+      ws.send(Buffer.concat([firstBuffer, bodyChunkBuffer]));
+    });
+
+    res.on('end', () => {
+      const firstBuffer = Buffer.alloc(9);
+      firstBuffer.writeUInt8(chunkTypeArray[3]);
+      firstBuffer.writeBigInt64BE(messageChunk.requestId, 1);
+      ws.send(firstBuffer);
+    });
+
+    res.on('error', (err) => {
+      const chunk = Buffer.alloc(9);
+      chunk.writeUInt8(chunkTypeArray[0]);
+      chunk.writeBigInt64BE(messageChunk.requestId, 1);
+      ws.send(Buffer.concat([chunk, Buffer.from(err.message)]));
+    });
+  }
+
   private connect(i: number, url: string): void {
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(url, this._registerClientOptions);
     this._wsList[i] = ws;
     ws.onopen = () => {
       console.log(`Succeeded to connect to vertx http gateway via ${url}`);
@@ -89,39 +127,16 @@ export class VertxHttpGatewayConnector {
             path: uri,
             method: httpMethod,
             headers,
-            protocol: this._serviceUseSsl ? 'https:' : 'http:',
+            agent: this._proxyAgent,
           };
 
-          const req = http.request(requestOptions, (res) => {
-            const responseMessageInfoChunkBody = buildResponseMessageInfoChunkBody(res);
-            const firstBuffer = Buffer.alloc(9);
-            firstBuffer.writeUInt8(chunkTypeArray[1]);
-            firstBuffer.writeBigInt64BE(messageChunk.requestId, 1);
-            const responseInfoChunkBodyBuffer = Buffer.from(responseMessageInfoChunkBody);
-            ws.send(Buffer.concat([firstBuffer, responseInfoChunkBodyBuffer]));
-
-            res.on('data', (data) => {
-              const firstBuffer = Buffer.alloc(9);
-              firstBuffer.writeUInt8(chunkTypeArray[2]);
-              firstBuffer.writeBigInt64BE(messageChunk.requestId, 1);
-              const bodyChunkBuffer = Buffer.from(data as Uint8Array);
-              ws.send(Buffer.concat([firstBuffer, bodyChunkBuffer]));
-            });
-
-            res.on('end', () => {
-              const firstBuffer = Buffer.alloc(9);
-              firstBuffer.writeUInt8(chunkTypeArray[3]);
-              firstBuffer.writeBigInt64BE(messageChunk.requestId, 1);
-              ws.send(firstBuffer);
-            });
-
-            res.on('error', (err) => {
-              const chunk = Buffer.alloc(9);
-              chunk.writeUInt8(chunkTypeArray[0]);
-              chunk.writeBigInt64BE(messageChunk.requestId, 1);
-              ws.send(Buffer.concat([chunk, Buffer.from(err.message)]));
-            });
-          });
+          const req = this._serviceUseSsl
+            ? https.request(requestOptions, (res) => {
+                this.handleIncomingMessage(res, messageChunk, ws);
+              })
+            : http.request(requestOptions, (res) => {
+                this.handleIncomingMessage(res, messageChunk, ws);
+              });
           await cache.setItem(String(messageChunk.requestId), req, { ttl: cacheTTL });
 
           req.on('close', () => {
@@ -138,14 +153,14 @@ export class VertxHttpGatewayConnector {
         }
 
         if (messageChunk.chunkType === chunkTypeArray[2]) {
-          const req: http.ClientRequest | undefined = await cache.getItem(String(messageChunk.requestId));
+          const req: ClientRequest | undefined = await cache.getItem(String(messageChunk.requestId));
           if (req != null) {
             req.write(messageChunk.chunkBody);
           }
         }
 
         if (messageChunk.chunkType === chunkTypeArray[3]) {
-          const req: http.ClientRequest | undefined = await cache.getItem(String(messageChunk.requestId));
+          const req: ClientRequest | undefined = await cache.getItem(String(messageChunk.requestId));
           if (req != null) {
             req.end();
           }
@@ -164,7 +179,7 @@ export class VertxHttpGatewayConnector {
     });
 
     ws.on('error', (err) => {
-      console.error(`failed to connect to vertx http gateway ${url} due to ${err.message}`);
+      console.error(`failed to connect to vertx http gateway ${url} due to ${err.message}`, err);
     });
   }
 }
