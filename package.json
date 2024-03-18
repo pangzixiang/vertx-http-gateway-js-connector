@@ -47,8 +47,6 @@
     "typescript": "^5.4.2"
   },
   "dependencies": {
-    "node-ts-cache": "^4.4.0",
-    "node-ts-cache-storage-memory": "^4.4.0",
     "ws": "^8.16.0"
   }
 }

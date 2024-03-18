@@ -3,14 +3,9 @@ import { MessageChunk } from './model/MessageChunk';
 import { buildResponseMessageInfoChunkBody, chunkTypeArray } from './Commons';
 import { RequestMessageInfoChunkBody } from './model/RequestMessageInfoChunkBody';
 import { type ClientRequest, type IncomingMessage, type RequestOptions } from 'node:http';
-import { CacheContainer } from 'node-ts-cache';
-import { MemoryStorage } from 'node-ts-cache-storage-memory';
 import WebSocket, { type ClientOptions } from 'ws';
 import * as https from 'https';
 import * as http from 'http';
-
-const cache = new CacheContainer(new MemoryStorage());
-const cacheTTL = 5 * 60;
 
 export class VertxHttpGatewayConnector {
   private readonly _connectionUrl: string;
@@ -24,6 +19,7 @@ export class VertxHttpGatewayConnector {
   private readonly _pathConverter: PathConverter;
   private readonly _registerClientOptions: ClientOptions | undefined;
   private readonly _proxyAgent: http.Agent | https.Agent | undefined;
+  private readonly _requestStorage: Map<string, ClientRequest>;
 
   constructor(options: VertxHttpGatewayConnectorOptionsType) {
     const {
@@ -41,6 +37,7 @@ export class VertxHttpGatewayConnector {
       proxyAgent = undefined,
     } = options;
 
+    this._requestStorage = new Map<string, ClientRequest>();
     this._connectionUrl = `${registerUseSsl ? 'wss' : 'ws'}://${registerHost}:${registerPort}${registerPath}?serviceName=${serviceName}&servicePort=${servicePort}&instance=`;
     this._serviceHost = serviceHost;
     this._serviceUseSsl = serviceUseSsl;
@@ -110,62 +107,60 @@ export class VertxHttpGatewayConnector {
 
     ws.on('message', (data: Buffer) => {
       const messageChunk = new MessageChunk(data);
+      if (messageChunk.chunkType === chunkTypeArray[1]) {
+        const requestMessageInfoChunkBody = new RequestMessageInfoChunkBody(messageChunk.chunkBody.toString());
+        const httpMethod = requestMessageInfoChunkBody.httpMethod;
+        const headers = requestMessageInfoChunkBody.headers;
+        const uri = this._pathConverter(requestMessageInfoChunkBody.uri);
+        // const httpVersion = requestMessageInfoChunkBody.httpVersion;
 
-      void (async () => {
-        if (messageChunk.chunkType === chunkTypeArray[1]) {
-          const requestMessageInfoChunkBody = new RequestMessageInfoChunkBody(messageChunk.chunkBody.toString());
-          const httpMethod = requestMessageInfoChunkBody.httpMethod;
-          const headers = requestMessageInfoChunkBody.headers;
-          const uri = this._pathConverter(requestMessageInfoChunkBody.uri);
-          // const httpVersion = requestMessageInfoChunkBody.httpVersion;
+        console.debug(`start to handle request for ${httpMethod} ${uri}`);
 
-          console.debug(`start to handle request for ${httpMethod} ${uri}`);
+        const requestOptions: RequestOptions = {
+          hostname: this._serviceHost,
+          port: this._servicePort,
+          path: uri,
+          method: httpMethod,
+          headers,
+          agent: this._proxyAgent,
+        };
 
-          const requestOptions: RequestOptions = {
-            hostname: this._serviceHost,
-            port: this._servicePort,
-            path: uri,
-            method: httpMethod,
-            headers,
-            agent: this._proxyAgent,
-          };
+        const req = this._serviceUseSsl
+          ? https.request(requestOptions, (res) => {
+              this.handleIncomingMessage(res, messageChunk, ws);
+            })
+          : http.request(requestOptions, (res) => {
+              this.handleIncomingMessage(res, messageChunk, ws);
+            });
 
-          const req = this._serviceUseSsl
-            ? https.request(requestOptions, (res) => {
-                this.handleIncomingMessage(res, messageChunk, ws);
-              })
-            : http.request(requestOptions, (res) => {
-                this.handleIncomingMessage(res, messageChunk, ws);
-              });
-          await cache.setItem(String(messageChunk.requestId), req, { ttl: cacheTTL });
+        this._requestStorage.set(String(messageChunk.requestId), req);
 
-          req.on('close', () => {
-            void cache.setItem(String(messageChunk.requestId), null, { ttl: 0 });
-            console.debug(`succeeded to handle request for ${httpMethod} ${uri}`);
-          });
+        req.on('close', () => {
+          this._requestStorage.delete(String(messageChunk.requestId));
+          console.debug(`succeeded to handle request for ${httpMethod} ${uri}`);
+        });
 
-          req.on('error', (err) => {
-            const chunk = Buffer.alloc(9);
-            chunk.writeUInt8(chunkTypeArray[0]);
-            chunk.writeBigInt64BE(messageChunk.requestId, 1);
-            ws.send(Buffer.concat([chunk, Buffer.from(err.message)]));
-          });
+        req.on('error', (err) => {
+          const chunk = Buffer.alloc(9);
+          chunk.writeUInt8(chunkTypeArray[0]);
+          chunk.writeBigInt64BE(messageChunk.requestId, 1);
+          ws.send(Buffer.concat([chunk, Buffer.from(err.message)]));
+        });
+      }
+
+      if (messageChunk.chunkType === chunkTypeArray[2]) {
+        const req: ClientRequest | undefined = this._requestStorage.get(String(messageChunk.requestId));
+        if (req != null) {
+          req.write(messageChunk.chunkBody);
         }
+      }
 
-        if (messageChunk.chunkType === chunkTypeArray[2]) {
-          const req: ClientRequest | undefined = await cache.getItem(String(messageChunk.requestId));
-          if (req != null) {
-            req.write(messageChunk.chunkBody);
-          }
+      if (messageChunk.chunkType === chunkTypeArray[3]) {
+        const req: ClientRequest | undefined = this._requestStorage.get(String(messageChunk.requestId));
+        if (req != null) {
+          req.end();
         }
-
-        if (messageChunk.chunkType === chunkTypeArray[3]) {
-          const req: ClientRequest | undefined = await cache.getItem(String(messageChunk.requestId));
-          if (req != null) {
-            req.end();
-          }
-        }
-      })();
+      }
     });
 
     ws.on('close', () => {
