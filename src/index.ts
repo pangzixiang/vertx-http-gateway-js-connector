@@ -126,6 +126,7 @@ export class VertxHttpGatewayConnector {
       healthCheckTimer = setTimeout(() => {
         console.error('Timeout for receive pong');
         this.setHealth(false);
+        ws.close();
       }, 5000);
 
       ws.once('pong', (data) => {
