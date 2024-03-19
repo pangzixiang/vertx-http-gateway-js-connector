@@ -1,6 +1,6 @@
 {
   "name": "vertx-http-gateway-js-connector",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "description": "Vert.x Http Gateway Connector For Node",
   "main": "dest/index.js",
   "types": "dest/index.d.ts",
