@@ -6,6 +6,7 @@ import { type ClientRequest, type IncomingMessage, type RequestOptions } from 'n
 import WebSocket, { type ClientOptions } from 'ws';
 import * as https from 'https';
 import * as http from 'http';
+import { clearTimeout } from 'node:timers';
 
 export class VertxHttpGatewayConnector {
   private readonly _connectionUrl: string;
@@ -20,6 +21,7 @@ export class VertxHttpGatewayConnector {
   private readonly _registerClientOptions: ClientOptions | undefined;
   private readonly _proxyAgent: http.Agent | https.Agent | undefined;
   private readonly _requestStorage: Map<string, ClientRequest>;
+  private _healthy: boolean;
 
   constructor(options: VertxHttpGatewayConnectorOptionsType) {
     const {
@@ -47,6 +49,7 @@ export class VertxHttpGatewayConnector {
     this._pathConverter = pathConverter;
     this._registerClientOptions = registerClientOptions;
     this._proxyAgent = proxyAgent;
+    this._healthy = false;
   }
 
   public start(): void {
@@ -65,6 +68,14 @@ export class VertxHttpGatewayConnector {
       console.log(`close connection ${ws.url}`);
       ws.close();
     });
+  }
+
+  public getHealth(): boolean {
+    return this._healthy;
+  }
+
+  private setHealth(isHealthy: boolean): void {
+    this._healthy = isHealthy;
   }
 
   private handleIncomingMessage(res: IncomingMessage, messageChunk: MessageChunk, ws: WebSocket): void {
@@ -101,9 +112,28 @@ export class VertxHttpGatewayConnector {
   private connect(i: number, url: string): void {
     const ws = new WebSocket(url, this._registerClientOptions);
     this._wsList[i] = ws;
+
     ws.onopen = () => {
       console.log(`Succeeded to connect to vertx http gateway via ${url}`);
+      this.setHealth(true);
     };
+
+    let healthCheckTimer: NodeJS.Timeout | undefined;
+
+    setInterval(() => {
+      ws.ping('ping', true);
+
+      healthCheckTimer = setTimeout(() => {
+        console.error('Timeout for receive pong');
+        this.setHealth(false);
+      }, 5000);
+
+      ws.once('pong', (data) => {
+        clearTimeout(healthCheckTimer);
+        console.debug('received pong');
+        this.setHealth(true);
+      });
+    }, 10000);
 
     ws.on('message', (data: Buffer) => {
       const messageChunk = new MessageChunk(data);
@@ -165,6 +195,7 @@ export class VertxHttpGatewayConnector {
 
     ws.on('close', () => {
       console.warn(`connection to vertx http gateway ${url} is closed`);
+      this.setHealth(false);
       if (!this._isClose) {
         this._reconnectList[i] = setTimeout(() => {
           console.log(`start to retry connection via ${url}`);
@@ -175,6 +206,7 @@ export class VertxHttpGatewayConnector {
 
     ws.on('error', (err) => {
       console.error(`failed to connect to vertx http gateway ${url} due to ${err.message}`, err);
+      this.setHealth(false);
     });
   }
 }
